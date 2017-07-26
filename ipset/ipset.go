@@ -95,6 +95,17 @@ func (s *IPSet) createHashSet(name string) error {
 // Example:
 // 	testIpset := ipset.New("test", "hash:ip", &ipset.Params{})
 func New(name string, hashtype string, p *Params) (*IPSet, error) {
+	if err := initCheck(); err != nil {
+		return nil, err
+	}
+
+	// check if exists, then load, else create
+	if exists(name) {
+		s := IPSet{name}
+
+		return &s;
+	}
+
 	// Using the ipset utilities default values here
 	if p.HashSize == 0 {
 		p.HashSize = 1024
@@ -113,9 +124,7 @@ func New(name string, hashtype string, p *Params) (*IPSet, error) {
 		return nil, fmt.Errorf("not a hash type: %s", hashtype)
 	}
 
-	if err := initCheck(); err != nil {
-		return nil, err
-	}
+
 
 	s := IPSet{name, hashtype, p.HashFamily, p.HashSize, p.MaxElem, p.Timeout}
 	err := s.createHashSet(name)
@@ -258,6 +267,14 @@ func destroyAll() error {
 		return fmt.Errorf("error destroying all ipsetz %s (%s)", err, out)
 	}
 	return nil
+}
+
+func exists(chain string) bool {
+	out, err := exec.Command(ipsetPath, "list", chain).CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 func getIpsetSupportedVersion() (bool, error) {
