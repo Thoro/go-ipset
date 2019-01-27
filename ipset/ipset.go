@@ -101,9 +101,9 @@ func New(name string, hashtype string, p *Params) (*IPSet, error) {
 
 	// check if exists, then load, else create
 	if exists(name) {
-		s := IPSet{name}
+		s := IPSet{ Name: name }
 
-		return &s;
+		return &s, nil;
 	}
 
 	// Using the ipset utilities default values here
@@ -270,7 +270,7 @@ func destroyAll() error {
 }
 
 func exists(chain string) bool {
-	out, err := exec.Command(ipsetPath, "list", chain).CombinedOutput()
+	_, err := exec.Command(ipsetPath, "list", chain).CombinedOutput()
 	if err != nil {
 		return false
 	}
