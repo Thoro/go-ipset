@@ -43,16 +43,27 @@ type Params struct {
 	HashSize   int
 	MaxElem    int
 	Timeout    int
+
+	// Range for bitmap:port
+	RangeFrom  int
+	RangeTo    int
 }
 
 // IPSet implements an Interface to an set.
 type IPSet struct {
 	Name       string
 	HashType   string
+
+
+	// for hash lists
 	HashFamily string
 	HashSize   int
 	MaxElem    int
 	Timeout    int
+
+	// for bitmap lists
+	RangeFrom int
+	RangeTo int
 }
 
 func initCheck() error {
@@ -75,6 +86,16 @@ func initCheck() error {
 	return nil
 }
 
+func (s *IPSet) create(name string) error {
+	if strings.HasPrefix(s.HashType, "hash") {
+		return s.createHashSet(name)
+	} else if strings.HasPrefix(s.HashType, "bitmap") {
+		return s.createBitmapSet(name)
+	}
+
+	return fmt.Errorf("Invalid set type: %s", s.HashType)
+}
+
 func (s *IPSet) createHashSet(name string) error {
 	/*	out, err := exec.Command("/usr/bin/sudo",
 		ipsetPath, "create", name, s.HashType, "family", s.HashFamily, "hashsize", strconv.Itoa(s.HashSize),
@@ -85,6 +106,26 @@ func (s *IPSet) createHashSet(name string) error {
 		return fmt.Errorf("error creating ipset %s with type %s: %v (%s)", name, s.HashType, err, out)
 	}
 	out, err = exec.Command(ipsetPath, "flush", name).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error flushing ipset %s: %v (%s)", name, err, out)
+	}
+	return nil
+}
+
+
+func (s *IPSet) createBitmapSet(name string) error {
+	/*	out, err := exec.Command("/usr/bin/sudo",
+		ipsetPath, "create", name, s.HashType, "family", s.HashFamily, "hashsize", strconv.Itoa(s.HashSize),
+		"maxelem", strconv.Itoa(s.MaxElem), "timeout", strconv.Itoa(s.Timeout), "-exist").CombinedOutput()*/
+	out, err := exec.Command(ipsetPath, "create", name, s.HashType, "range", strconv.Itoa(s.RangeFrom) + "-" + strconv.Itoa(s.RangeTo), 
+		"timeout", strconv.Itoa(s.Timeout), "-exist").CombinedOutput()
+
+	if err != nil {
+		return fmt.Errorf("error creating ipset %s with type %s: %v (%s)", name, s.HashType, err, out)
+	}
+
+	out, err = exec.Command(ipsetPath, "flush", name).CombinedOutput()
+	
 	if err != nil {
 		return fmt.Errorf("error flushing ipset %s: %v (%s)", name, err, out)
 	}
@@ -119,18 +160,34 @@ func New(name string, hashtype string, p *Params) (*IPSet, error) {
 		p.HashFamily = "inet"
 	}
 
-	// Check if hashtype is a type of hash
-	if !strings.HasPrefix(hashtype, "hash:") {
-		return nil, fmt.Errorf("not a hash type: %s", hashtype)
+	if p.RangeTo == 0 {
+		p.RangeTo = 65535
 	}
 
+	// Check if hashtype is a type of hash
+	if !strings.HasPrefix(hashtype, "hash:") || !strings.HasPrefix(hashtype, "bitmap:") {
+		return nil, fmt.Errorf("not a hash or bitmap type: %s", hashtype)
+	}
 
+	s := IPSet{
+		Name: name,
+		Timeout: p.Timeout,
 
-	s := IPSet{name, hashtype, p.HashFamily, p.HashSize, p.MaxElem, p.Timeout}
-	err := s.createHashSet(name)
+		HashType: hashtype,
+		HashFamily: p.HashFamily,
+		HashSize: p.HashSize,
+		MaxElem: p.MaxElem,
+		
+		RangeFrom: p.RangeFrom,
+		RangeTo: p.RangeTo,
+	}
+
+	err := s.create(s.Name)
+	
 	if err != nil {
 		return nil, err
 	}
+
 	return &s, nil
 }
 
@@ -138,24 +195,29 @@ func New(name string, hashtype string, p *Params) (*IPSet, error) {
 // The ipset is updated on the fly by hot swapping it with a temporary set.
 func (s *IPSet) Refresh(entries []string) error {
 	tempName := s.Name + "-temp"
-	err := s.createHashSet(tempName)
+	err := s.create(tempName)
+
 	if err != nil {
 		return err
 	}
+
 	for _, entry := range entries {
 		out, err := exec.Command(ipsetPath, "add", tempName, entry, "-exist").CombinedOutput()
 		if err != nil {
 			log.Errorf("error adding entry %s to set %s: %v (%s)", entry, tempName, err, out)
 		}
 	}
+
 	err = Swap(tempName, s.Name)
 	if err != nil {
 		return err
 	}
+
 	err = destroyIPSet(tempName)
 	if err != nil {
 		return err
 	}
+	
 	return nil
 }
 
